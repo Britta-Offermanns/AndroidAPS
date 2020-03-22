@@ -1,5 +1,11 @@
 # AndroidAPS
 
+Purpose of ga-zelle tests:
+* emulation of determine-basal to test effect of AAPS settings (folder what-if)
+* try some minor adaptions of AAPS specicific to my situation (YDMV)
+
+
+Original content:
 * Check the wiki: http://wiki.androidaps.org
 *  Everyone who’s been looping with AndroidAPS needs to fill out the form after 3 days of looping  https://docs.google.com/forms/d/14KcMjlINPMJHVt28MDRupa4sz4DDIooI4SrW0P3HSN8/viewform?c=0&w=1
 
