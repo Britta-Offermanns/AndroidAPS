@@ -48,7 +48,30 @@ function convert_bg(value, profile)
     }
 }
 
+
+function capInsulin(insulinReq, myTarget, myBg, insulinCap)
+{
+    // for noisy bg signal like from ES avoid too much insulin if we re already/still below a low target
+    // enabling target is currently assumed to be in  mg/dl !!
+    if (insulinReq>0 && myBg<myTarget && myTarget<95 && insulinCap) {
+        // var insulinRed = insulinReq * Math.pow(myBg / myTarget, 2.0);
+        // new method, effect is weaker near target, stronger further away
+        var insulinRed = insulinReq * Math.max(0, ( 1 - (1-myBg/myTarget)*3 ));
+        console.error("gz reduce insulinReq from", insulinReq, " to", insulinRed);
+        // deleted the Math." from round; may have returned 0
+        return round(insulinRed, 2);
+    }
+    else {
+        console.error("gz keep insulinReq at", insulinReq)
+        return insulinReq;
+    }
+}
+
+
 var determine_basal = function determine_basal(glucose_status, currenttemp, iob_data, profile, autosens_data, meal_data, tempBasalFunctions, microBolusAllowed, reservoir_data) {
+    // for enabling new feature capInsulin
+    var insulinCapBelowTarget = true;
+  
     var rT = {}; //short for requestedTemp
 
     var deliverAt = new Date();
@@ -838,9 +861,10 @@ var determine_basal = function determine_basal(glucose_status, currenttemp, iob_
         //rT.reason += "minGuardBG "+minGuardBG+"<"+threshold+": SMB disabled; ";
         enableSMB = false;
     }
-    if ( maxDelta > 0.20 * bg ) {
-        console.error("maxDelta",convert_bg(maxDelta, profile),"> 20% of BG",convert_bg(bg, profile),"- disabling SMB");
-        rT.reason += "maxDelta "+convert_bg(maxDelta, profile)+" > 20% of BG "+convert_bg(bg, profile)+": SMB disabled; ";
+    // GZ mod 2: increase limit from 20% to 30%
+    if ( maxDelta > 0.30 * bg ) {
+        console.error("maxDelta",convert_bg(maxDelta, profile),"> 30% of BG",convert_bg(bg, profile),"- disabling SMB");
+        rT.reason += "maxDelta "+convert_bg(maxDelta, profile)+" > 30% of BG "+convert_bg(bg, profile)+": SMB disabled; ";
         enableSMB = false;
     }
 
@@ -919,6 +943,8 @@ var determine_basal = function determine_basal(glucose_status, currenttemp, iob_
             //console.error("Increasing insulinReq from " + insulinReq + " to " + newinsulinReq);
             insulinReq = newinsulinReq;
         }
+        // first instance of gz mod Jan 2020
+        insulinReq = capInsulin(insulinReq, target_bg, bg, insulinCapBelowTarget);
         // rate required to deliver insulinReq less insulin over 30m:
         var rate = basal + (2 * insulinReq);
         rate = round_basal(rate, profile);
@@ -1031,6 +1057,8 @@ var determine_basal = function determine_basal(glucose_status, currenttemp, iob_
         var rate = basal + (2 * insulinReq);
         rate = round_basal(rate, profile);
         insulinReq = round(insulinReq,3);
+        // second instance of gz mod Jan 2020
+        insulinReq = capInsulin(insulinReq, target_bg, bg, insulinCapBelowTarget);
         rT.insulinReq = insulinReq;
         //console.error(iob_data.lastBolusTime);
         // minutes since last bolus
@@ -1044,16 +1072,27 @@ var determine_basal = function determine_basal(glucose_status, currenttemp, iob_
             if (typeof profile.maxSMBBasalMinutes == 'undefined' ) {
                 maxBolus = round( profile.current_basal * 30 / 60 ,1);
                 console.error("profile.maxSMBBasalMinutes undefined: defaulting to 30m");
+                console.error("gz maximSMB: from undefined maximBasalMinutes");
             // if IOB covers more than COB, limit maxBolus to 30m of basal
             } else if ( iob_data.iob > mealInsulinReq && iob_data.iob > 0 ) {
                 console.error("IOB",iob_data.iob,"> COB",meal_data.mealCOB+"; mealInsulinReq =",mealInsulinReq);
-                maxBolus = round( profile.current_basal * 30 / 60 ,1);
+                // minor mod on 22.Nov2019 by ga-zelle
+                // test 4 times the maxSMB to offset the low basal rates
+                // mod 2 on 03.Jan.2020: make it same as for target; also provides external influence through maxSMBBasalMinutes
+                // maxBolus = round( 4 * profile.current_basal * 30 / 60 ,1);
+                maxBolus = round( 3 * profile.current_basal * profile.maxSMBBasalMinutes / 60 ,1);
+                console.error("gz maximSMB: from IOB > MealInsulinReq without special treatment");
             } else {
                 console.error("profile.maxSMBBasalMinutes:",profile.maxSMBBasalMinutes,"profile.current_basal:",profile.current_basal);
-                maxBolus = round( profile.current_basal * profile.maxSMBBasalMinutes / 60 ,1);
+                // minor mod on 18.Nov2019 by ga-zelle
+                // test triple the maxSMB to offset the low basal rates
+                // was: maxBolus = round( profile.current_basal * profile.maxSMBBasalMinutes / 60 ,1);
+                maxBolus = round( 3 * profile.current_basal * profile.maxSMBBasalMinutes / 60 ,1);
+                console.error("gz maximSMB: from currentBasal & maximBasalMinutes");
             }
             // bolus 1/2 the insulinReq, up to maxBolus, rounding down to nearest 0.1U
-            microBolus = Math.floor(Math.min(insulinReq/2,maxBolus)*10)/10;
+            // gy mod 2 on 03.Jan.202: bolus 60% instead of 50%
+            microBolus = Math.floor(Math.min(insulinReq*0.6,maxBolus)*10)/10;
             // calculate a long enough zero temp to eventually correct back up to target
             var smbTarget = target_bg;
             var worstCaseInsulinReq = (smbTarget - (naive_eventualBG + minIOBPredBG)/2 ) / sens;
