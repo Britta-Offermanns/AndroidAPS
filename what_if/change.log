@@ -1,0 +1,5 @@
+08.March 2020
+=============
+Changes Related to variant definition improve checking the success of variant definition process:
+ - debugged reporting of new, additional parameters
+ - added reporting of ignored instructions
