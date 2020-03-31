@@ -228,13 +228,13 @@ def setVariant():
     # additional parameters collected here
     # these need an according modification in "determine_basal.py"
     new_parameter = {}
-    # first, do the AAPS standard assignments                       ### variations are set in the <variant>.dat file
-    new_parameter['maxDeltaRatio'] = 0.2                            ### additional parameter; AAPS is fix at 0.2
-    new_parameter['SMBRatio'] = 0.5                                 ### additional parameter; AAPS is fix at 0.5; I use 0.6 as no other rig interferes
-    new_parameter['maxBolusIOBUsual'] = True                        ### additional parameter; AAPS is fix at True, but my basal is too low
-    new_parameter['maxBolusIOBRatio'] = 1                           ### additional parameter; AAPS is fix at 1, but my basal is too low
-    new_parameter['maxBolusTargetRatio'] = 1                        ### additional parameter; AAPS is fix at 1, but my basal is too low
-    new_parameter['insulinCapBelowTarget'] = False                  ### additional parameter; AAPS is fix at False; enable capping below target
+    # first, do the AAPS standard assignments           ### variations are set in the <variant>.dat file
+    new_parameter['maxDeltaRatio'] = 0.2                ### additional parameter; AAPS is fix at 0.2
+    new_parameter['SMBRatio'] = 0.5                     ### additional parameter; AAPS is fix at 0.5; I use 0.6 as no other rig interferes
+    new_parameter['maxBolusIOBUsual'] = True            ### additional parameter; AAPS is fix at True, but my basal is too low
+    new_parameter['maxBolusIOBRatio'] = 1               ### additional parameter; AAPS is fix at 1, but my basal is too low
+    new_parameter['maxBolusTargetRatio'] = 1.001        ### additional parameter; AAPS is fix at 1, bit i saw rounding problems otherwise
+    new_parameter['insulinCapBelowTarget'] = False      ### additional parameter; AAPS is fix at False; enable capping below target
     
     ####################################################################################################################################
     # read the variations and apply them
@@ -390,7 +390,7 @@ def TreatLoop(Curly, log, lcount):
         setVariant()
         Fcasts = getOrigPred(suggest['predBGs'])
         Flows  = []
-        reT = detSMB.determine_basal(glucose_status, currenttemp, iob_data, profile, autosens_data, meal_data, tempBasalFunctionsDummy, True, reservoir, thisTime, Fcasts)  # , Flows) leave out last argument in published version
+        reT = detSMB.determine_basal(glucose_status, currenttemp, iob_data, profile, autosens_data, meal_data, tempBasalFunctionsDummy, True, reservoir, thisTime, Fcasts, Flows)  # last argument for compatibilty with future version
         reason = echo_rT(reT)                           # overwrite the original reason
         maxBolStr = getReason(reason, 'maxBolus', '. ', 1)
         if len(maxBolStr) > 5 :
@@ -529,6 +529,12 @@ def get_autosens_data(lcount, st) :                     # key = 86
 
 def ConvertSTRINGooDate(stmp) :
     # stmp is datetime string incl millis, i.e. like "2019-05-22T12:06:48.091Z"
+    if stmp < "2019-10-27T03:00:00.000Z":
+        dlst = 3600                                 #    dlst period summer 2019
+    elif stmp < "2020-03-29T02:00:00.000Z":
+        dlst = 0                                    # no dlst period winter 2019/20
+    else:
+        dlst = 3600                                 #    dlst period summer 2020
     MSJahr		= eval(    stmp[ 0:4])
     MSMonat		= eval('1'+stmp[ 5:7]) -100
     MSTag		= eval('1'+stmp[ 8:10])-100
@@ -539,7 +545,7 @@ def ConvertSTRINGooDate(stmp) :
     #print ('millis aus '+stmp+' = '+str(MSmillis))
     NumericDate= datetime.datetime(MSJahr, MSMonat, MSTag, MSStunde, MSMinute, MSSekunde, MSmillis*1000)
     #imestamp = NumericDate.replace(tzinfo=timezone.utc).timestamp() + 3600 # 1h MEZ offset
-    timestamp = int( (NumericDate.timestamp() + 3600) * 1000 )              # 1h MEZ offset; beware of dlst !!!!!!!!!!!!!!!!!!!!
+    timestamp = int( (NumericDate.timestamp() + 3600 + dlst) * 1000 )       # 1h MEZ offset
     #print("Eingang: " + stmp + "\nAusgang: " + str(timestamp) )
     return timestamp
 
@@ -557,6 +563,7 @@ def scanLogfile(fn):
     log = open(fn + '.orig.txt', 'w')
     log.write('AAPS scan from AAPS Logfile for SMB comparison created on ' + formatdate(localtime=True) + '\n')
     log.write('FILE='+fn + '\n')
+    dataType_offset = 1                         #################### used for V2.6.1
     global lcount
     lcount  = 0
     lf = open(fn, 'r')
@@ -581,19 +588,24 @@ def scanLogfile(fn):
                         pass
                     elif Block2[:-3] == '[DetermineBasalAdapterSMBJS.invoke():':  # various input items for loop
                         dataStr = sLine[sLine.find(']: ')+3:]
-                        dataType = Block2[len(Block2)-3:-1]                  # extract last 2 digits as type key
-                        #print ('found type '+dataType+' -->'+dataStr)
-                        if   dataType == '80' :                             get_glucose_status(lcount, dataStr)
-                        if   dataType == '81' :                             get_iob_data(lcount, dataStr, log)
-                        if   dataType == '82' :                             get_currenttemp(lcount, dataStr)
-                        if   dataType == '83' :                             get_profile(lcount, dataStr)
-                        if   dataType == '84' :                             get_meal_data(lcount, dataStr)
-                        if   dataType == '86' :                             get_autosens_data(lcount, dataStr)
+                        dataType = eval(Block2[len(Block2)-3:-1])           # extract last 2 digits as type key
+                        if   dataType == 79 :                               # start counter in V2.5.1 only
+                            dataType_offset = 0                             #################### used for V2.5.1
+                        elif dataType == dataType_offset+80 :               get_glucose_status(lcount, dataStr)
+                        elif dataType == dataType_offset+81 :               get_iob_data(lcount, dataStr, log)
+                        elif dataType == dataType_offset+82 :               get_currenttemp(lcount, dataStr)
+                        elif dataType == dataType_offset+83 :               get_profile(lcount, dataStr)
+                        elif dataType == dataType_offset+84 :               get_meal_data(lcount, dataStr)
+                        elif dataType == dataType_offset+86 :               get_autosens_data(lcount, dataStr)
                     elif Block2 == '[LoggerCallback.jsFunction_log():39]':  # script debug info from console.error
                         PrepareSMB(sLine, log, lcount)   
-                    elif Block2 == '[DbLogger.dbAdd():29]':
+                    elif Block2 == '[DbLogger.dbAdd():29]':                 ################## flag for V2.5.1
                         Curly =  hole(sLine, 1+sOffset+len(Block2), '{', '}')
                         if Curly.find('{"device":"openaps:')==0:   TreatLoop(Curly, log, lcount)
+                elif zeile.find('data:{"device":"openaps:') == 0 :          ################## flag for V2.6.1
+                    Curly =  hole(zeile, 5, '{', '}')
+                    #print('calling TreatLoop in row '+str(lcount)+' with\n'+Curly)
+                    if Curly.find('{"device":"openaps:')==0:   TreatLoop(Curly, log, lcount)
         except UnicodeDecodeError:              # needed because "for zeile in lf" does not work with AAPS 2.5 containg non-ASCII codes
             lcount +=  1                        # skip this line, it contains non-ASCII characters!
             
